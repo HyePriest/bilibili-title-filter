@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>B站首页过滤</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand-mark">B</div>
+      <div class="brand-text">
+        <h1>B站首页过滤</h1>
+        <p id="page-status">正在读取当前首页……</p>
+      </div>
+      <label class="master-toggle">
+        <span id="filter-enabled-label">已开启</span>
+        <span class="switch">
+          <input id="filter-enabled" type="checkbox" aria-label="启用插件过滤">
+          <span></span>
+        </span>
+      </label>
+    </header>
+
+    <nav class="tabs" aria-label="功能切换">
+      <button class="tab active" data-tab="rules" type="button">过滤规则</button>
+      <button class="tab" data-tab="records" type="button">屏蔽记录</button>
+      <button class="tab" data-tab="ups" type="button">屏蔽名单</button>
+    </nav>
+
+    <main>
+      <section id="panel-rules" class="panel active">
+        <article class="setting-card title-card">
+          <div class="card-heading">
+            <div>
+              <h2>标题关键词</h2>
+              <p>标题包含任意关键词时隐藏视频</p>
+            </div>
+            <span id="title-keyword-count" class="count-pill">0</span>
+          </div>
+          <div id="title-editor" class="tag-editor tag-editor-blue">
+            <div class="tag-list"></div>
+            <input type="text" placeholder="输入后按回车，例如：大型纪录片" autocomplete="off">
+          </div>
+        </article>
+
+        <article class="setting-card up-card">
+          <div class="card-heading">
+            <div>
+              <h2>UP名称关键词</h2>
+              <p>UP名称包含任意关键词时隐藏其视频</p>
+            </div>
+            <span id="up-keyword-count" class="count-pill">0</span>
+          </div>
+          <div id="up-editor" class="tag-editor tag-editor-orange">
+            <div class="tag-list"></div>
+            <input type="text" placeholder="输入后按回车，例如：纪录片" autocomplete="off">
+          </div>
+        </article>
+
+        <article class="setting-card quality-card">
+          <div class="card-heading quality-heading">
+            <div>
+              <h2>推荐质量过滤</h2>
+              <p>读取公开视频数据，低于阈值时直接隐藏</p>
+            </div>
+            <label class="switch" title="启用推荐质量过滤">
+              <input id="quality-enabled" type="checkbox">
+              <span></span>
+            </label>
+          </div>
+          <div class="quality-modes" role="group" aria-label="过滤强度">
+            <button type="button" data-quality-mode="loose">宽松</button>
+            <button type="button" data-quality-mode="standard">标准</button>
+            <button type="button" data-quality-mode="strict">严格</button>
+          </div>
+          <p id="quality-description" class="quality-description"></p>
+          <div class="score-factors">
+            <span>投币收藏</span>
+            <span>同UP重复</span>
+            <span>近期重复</span>
+          </div>
+        </article>
+
+        <article class="setting-card content-card">
+          <div class="card-heading compact-heading">
+            <div>
+              <h2>分区与标签</h2>
+              <p>命中后直接隐藏；标签读取可能稍有延迟</p>
+            </div>
+          </div>
+          <div class="sub-editor-heading">
+            <span>分区关键词</span>
+            <span id="category-keyword-count" class="count-pill">0</span>
+          </div>
+          <div id="category-editor" class="tag-editor tag-editor-purple compact-editor">
+            <div class="tag-list"></div>
+            <input type="text" placeholder="例如：娱乐、鬼畜" autocomplete="off">
+          </div>
+          <div class="sub-editor-heading second">
+            <span>标签关键词</span>
+            <span id="tag-keyword-count" class="count-pill">0</span>
+          </div>
+          <div id="tag-editor" class="tag-editor tag-editor-green compact-editor">
+            <div class="tag-list"></div>
+            <input type="text" placeholder="例如：营销号、短剧" autocomplete="off">
+          </div>
+        </article>
+
+        <article class="setting-card special-card">
+          <div class="card-heading">
+            <div>
+              <h2>特殊推荐类型</h2>
+              <p>默认隐藏课堂、直播、综艺等特殊卡片</p>
+            </div>
+            <span id="special-type-count" class="count-pill">0</span>
+          </div>
+          <div id="special-type-editor" class="tag-editor tag-editor-yellow compact-editor">
+            <div class="tag-list"></div>
+            <input type="text" placeholder="例如：课堂、直播、综艺" autocomplete="off">
+          </div>
+        </article>
+
+        <article class="setting-card shared-state-card">
+          <div class="card-heading">
+            <div>
+              <h2>共享状态文件</h2>
+              <p>Chrome 和 Edge 读取同一文件并合并规则</p>
+            </div>
+            <span id="shared-state-indicator" class="shared-state-indicator">未连接</span>
+          </div>
+          <p id="shared-state-detail" class="shared-state-detail">请在独立设置页中选择文件夹并完成长期授权。</p>
+          <div class="shared-state-actions">
+            <button id="open-shared-settings" class="primary-button" type="button">共享文件设置</button>
+            <button id="refresh-shared-state" class="outline-button" type="button" disabled>立即更新</button>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="panel-records" class="panel">
+        <div class="record-toolbar">
+          <div class="segmented">
+            <button class="segment active" data-record-mode="current" type="button">当前首页</button>
+            <button class="segment" data-record-mode="history" type="button">最近100条</button>
+          </div>
+          <button id="clear-history" class="text-button small" type="button">清空记录</button>
+        </div>
+        <div id="record-list" class="record-list"></div>
+      </section>
+
+      <section id="panel-ups" class="panel">
+        <article class="setting-card blocklist-card">
+          <div class="card-heading">
+            <div>
+              <h2>屏蔽名单</h2>
+              <p>最近新增置顶；名称精确匹配，UID在UP改名后仍然有效</p>
+            </div>
+            <span id="block-count" class="count-pill">0</span>
+          </div>
+          <div class="block-entry">
+            <input id="block-input" type="text" placeholder="输入UP名称、UID或个人空间链接" autocomplete="off">
+            <button id="add-block" class="primary-button compact" type="button">添加</button>
+          </div>
+          <p class="block-entry-hint">也支持“UP名称 | UID”；输入后按回车即可。</p>
+          <div class="import-row">
+            <button id="import-blacklist" class="outline-button" type="button">同步B站拉黑名单</button>
+            <span id="import-status"></span>
+          </div>
+          <input id="up-search" class="search-input" type="search" placeholder="在全部屏蔽名单中搜索名称或UID" autocomplete="off">
+          <div id="up-list" class="up-list"></div>
+        </article>
+      </section>
+
+    </main>
+
+    <footer id="save-status" aria-live="polite"></footer>
+    <script src="special-types.js"></script>
+    <script src="shared-state.js"></script>
+    <script src="record-groups.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

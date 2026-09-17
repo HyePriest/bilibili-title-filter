@@ -1,0 +1,15 @@
+# Personal rules and blocklists
+bilibili-title-filter-state.json
+
+# Local backups and publishing artifacts
+.codex-backups/
+.publish/
+*.zip
+
+# Local tooling and credentials
+.env
+.env.*
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

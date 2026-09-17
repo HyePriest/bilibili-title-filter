@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>共享文件设置 · B站首页过滤</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="settings-shell">
+      <header class="settings-header">
+        <div class="brand-mark">B</div>
+        <div>
+          <p class="eyebrow">B站首页过滤</p>
+          <h1>共享文件设置</h1>
+          <p>让 Chrome 与 Edge 通过同一个本地文件合并过滤规则和屏蔽名单。</p>
+        </div>
+      </header>
+
+      <section class="settings-card">
+        <div class="status-heading">
+          <div>
+            <h2>文件夹连接</h2>
+            <p id="folder-name">尚未选择共享文件夹</p>
+          </div>
+          <span id="permission-state" class="status-badge">未连接</span>
+        </div>
+
+        <div id="permission-help" class="permission-help">
+          首次使用时，在 Chrome 和 Edge 中分别选择同一个插件文件夹。
+        </div>
+
+        <div class="primary-actions">
+          <button id="authorize-folder" class="primary-button" type="button" hidden>授予长期权限</button>
+          <button id="choose-folder" class="outline-button" type="button">选择共享文件夹</button>
+          <button id="merge-now" class="outline-button" type="button" disabled>立即合并</button>
+        </div>
+        <button id="forget-folder" class="danger-link" type="button" hidden>取消连接</button>
+        <p id="action-status" class="action-status" aria-live="polite"></p>
+      </section>
+
+      <section class="settings-card guide-card">
+        <h2>长期授权只需完成一次</h2>
+        <ol>
+          <li>第一次点击“选择共享文件夹”，选择插件所在文件夹。</li>
+          <li>如果以后显示“需要长期授权”，点击上面的按钮。</li>
+          <li>浏览器询问时选择“每次访问时允许”，不要选择“仅此次允许”。</li>
+        </ol>
+        <p>浏览器要求授权必须由你点击触发，插件不能静默获得本地文件权限。</p>
+      </section>
+
+      <section class="settings-card data-card">
+        <h2>共享范围</h2>
+        <p>共享标题、UP关键词、分区、标签、特殊类型和屏蔽名单，并在两边取并集。</p>
+        <p>屏蔽记录、质量缓存和近期推荐次数仍分别保存在两个浏览器中。</p>
+      </section>
+    </main>
+
+    <script src="special-types.js"></script>
+    <script src="shared-state.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

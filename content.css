@@ -1,0 +1,78 @@
+main [data-btf-hidden-slot="true"] {
+  display: none !important;
+}
+
+/* Keep the native load trigger at the first vacancy after filtering packs rows. */
+main [data-btf-load-anchor="true"] {
+  order: 1 !important;
+}
+
+main [data-btf-load-placeholder="true"] {
+  order: 2 !important;
+}
+
+main [data-btf-card-ui="true"] .btf-block-up-button {
+  appearance: none;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid rgba(251, 114, 153, 0.55);
+  border-radius: 4px;
+  background: transparent;
+  color: #fb7299;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  vertical-align: middle;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+main [data-btf-card-ui="true"]:hover .btf-block-up-button,
+main [data-btf-card-ui="true"] .btf-block-up-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+main [data-btf-card-ui="true"] .btf-block-up-button:hover:not(:disabled) {
+  background: #fb7299;
+  color: #fff;
+}
+
+main [data-btf-card-ui="true"] .btf-block-up-button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+[data-btf-action-toast="true"] {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  z-index: 2147483647;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(32, 32, 32, 0.94);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+[data-btf-action-toast="true"][data-tone="success"] {
+  background: rgba(0, 160, 106, 0.94);
+}
+
+[data-btf-action-toast="true"][data-tone="error"] {
+  background: rgba(202, 45, 72, 0.96);
+}
+
+[data-btf-action-toast="true"].btf-action-toast--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
