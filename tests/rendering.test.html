@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>B站过滤：卡片刷新回归验证</title>
+<link rel="stylesheet" href="/content.css">
+<style>
+  body { font: 15px/1.6 system-ui; margin: 24px; }
+  #grid { display: grid; grid-template-columns: repeat(3, 180px); gap: 12px; }
+  .feed-card, .floor-single-card { min-height: 110px; background: #f5f5f5; }
+  .bili-video-card__skeleton { height: 100px; background: #ddd; }
+  .pass { color: #08783c; } .fail { color: #b52121; }
+</style>
+<h1>卡片刷新回归验证</h1>
+<p>仅使用虚构卡片和内存中的测试设置；不读取浏览器设置、不请求B站接口。</p>
+<ol id="results"></ol>
+<header id="header"></header>
+<div id="mount"></div>
+<script>
+  const changes = [];
+  const messages = [];
+  let releaseSettings;
+  let initialSettings = true;
+  const syncSettings = {
+    btfEnabled: !new URLSearchParams(location.search).has('off'),
+    btfTitleKeywords: ['block-me'], btfUpKeywords: [], btfCategoryKeywords: [],
+    btfTagKeywords: [], btfSpecialTypes: ['直播'], btfSpecialTypesVersion: 2,
+    btfQualityEnabled: false, btfQualityMode: 'standard'
+  };
+  const localSettings = {};
+  const storage = (values, delayed = false) => ({
+    get(defaults, callback) {
+      const complete = () => callback({ ...defaults, ...values });
+      if (delayed && initialSettings) {
+        initialSettings = false;
+        releaseSettings = complete;
+      } else queueMicrotask(complete);
+    },
+    set(valuesToSet, callback) { Object.assign(values, valuesToSet); callback?.(); }
+  });
+  window.chrome = {
+    runtime: { id: 'rendering-test', onMessage: { addListener(fn) { messages.push(fn); } },
+      sendMessage(_message, callback) { callback?.(); } },
+    storage: { sync: storage(syncSettings, true), local: storage(localSettings),
+      onChanged: { addListener(fn) { changes.push(fn); } } }
+  };
+  // Unexpected network activity is a test failure, including accidental official blocking.
+  let networkRequests = 0;
+  window.fetch = () => { networkRequests++; return Promise.reject(new Error('Network disabled in test')); };
+  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  function card(id, title = '', className = 'feed-card') {
+    const element = document.createElement('div');
+    element.id = id;
+    element.className = className;
+    populate(element, title);
+    return element;
+  }
+  function populate(element, title) {
+    element.innerHTML = title
+      ? `<div class="bili-video-card"><div class="bili-video-card__wrap"><h3 class="bili-video-card__info--tit"><a href="https://www.bilibili.com/video/BV1Test000001">${title}</a></h3></div></div>`
+      : '<div class="bili-video-card"><div class="bili-video-card__skeleton"></div></div>';
+  }
+  function visible(element) {
+    return getComputedStyle(element).visibility !== 'hidden' && element.getBoundingClientRect().height > 0;
+  }
+  function hidden(element) { return element.getAttribute('data-btf-hidden-slot') === 'true'; }
+  function assert(condition, text) { if (!condition) throw new Error(text); }
+  let failures = 0;
+  async function check(name, run) {
+    const line = document.createElement('li');
+    try { await run(); line.className = 'pass'; line.textContent = `PASS ${name}`; }
+    catch (error) { failures++; line.className = 'fail'; line.textContent = `FAIL ${name}: ${error.message}`; }
+    document.querySelector('#results').append(line);
+  }
+  const delayedMount = new URLSearchParams(location.search).has('late');
+  const main = document.createElement('main');
+  main.innerHTML = '<div id="grid"></div>';
+  const grid = main.firstElementChild;
+  const loading = card('loading');
+  const blocked = card('blocked', 'block-me first');
+  const allowed = card('allowed', 'allowed first');
+  grid.append(loading, blocked, allowed);
+  document.querySelector('#header').append(card('header-card', 'block-me header'));
+  if (!delayedMount) document.querySelector('#mount').append(main);
+</script>
+<script src="/special-types.js"></script>
+<script src="/quality.js"></script>
+<script src="/feed-loader.js"></script>
+<script src="/content.js"></script>
+<script>
+  (async () => {
+    await settle();
+    if (!delayedMount) await check('设置加载期间保留原生骨架', () => assert(visible(loading), '加载卡片被隐藏'));
+    releaseSettings();
+    await settle();
+    if (delayedMount) { document.querySelector('#mount').append(main); await settle(); }
+    if (!syncSettings.btfEnabled) {
+      await check('保存为关闭状态时首页初次加载不执行过滤', () => assert(visible(blocked) && !hidden(blocked), '初次加载忽略关闭状态'));
+      syncSettings.btfEnabled = true;
+      changes.forEach(listener => listener({ btfEnabled: { newValue: true } }, 'sync'));
+      await settle();
+    }
+    await check('未完成的卡片保持可见', () => assert(visible(loading), '仍处于不可见状态'));
+    await check('命中规则时隐藏完整网格项', () => assert(hidden(blocked) && !visible(blocked), '未隐藏命中卡片'));
+    await check('剩余视频自动补位', () => assert(allowed.offsetTop === loading.offsetTop && allowed.offsetLeft - loading.offsetLeft === 192, '网格仍留有空位'));
+    await check('页头不受首页过滤影响', () => assert(visible(document.querySelector('#header-card')), '页头被隐藏'));
+
+    populate(blocked, '');
+    await settle();
+    await check('被屏蔽卡片复用为加载骨架后恢复显示', () => assert(!hidden(blocked) && visible(blocked), '保留了旧的隐藏状态'));
+    populate(blocked, 'allowed replacement');
+    await settle();
+    await check('复用后的视频重新检查并显示', () => assert(visible(blocked) && !hidden(blocked), '新视频未显示'));
+
+    allowed.querySelector('a').textContent = 'block-me changed';
+    await settle();
+    await check('文本更新后重新过滤', () => assert(hidden(allowed), '漏掉了新的关键词'));
+    allowed.querySelector('a').textContent = 'allowed again';
+    await settle();
+    await check('文本恢复后释放隐藏状态', () => assert(visible(allowed) && !hidden(allowed), '保留了旧结果'));
+
+    const badgeCard = card('badge', 'badge example');
+    const badge = document.createElement('span');
+    badge.textContent = '直播';
+    badgeCard.firstElementChild.append(badge);
+    grid.append(badgeCard);
+    await settle();
+    badge.className = 'bili-video-card__image--badge';
+    await settle();
+    await check('徽标样式更新后重新识别', () => assert(hidden(badgeCard), '未响应class更新'));
+    badge.className = '';
+    await settle();
+    await check('徽标样式移除后释放旧结果', () => assert(!hidden(badgeCard), '未响应class移除'));
+    badge.setAttribute('data-badge', '直播');
+    await settle();
+    await check('徽标数据更新后重新识别', () => assert(hidden(badgeCard), '未响应data-badge更新'));
+    badge.remove();
+    await settle();
+    await check('徽标移除后恢复卡片', () => assert(!hidden(badgeCard), '徽标旧状态未清除'));
+
+    const malformed = card('malformed', 'bad card');
+    const select = malformed.querySelector.bind(malformed);
+    malformed.querySelector = selector => {
+      if (selector === '.bili-video-card__info--tit') throw new Error('Simulated malformed card');
+      return select(selector);
+    };
+    const later = card('later', 'block-me after malformed');
+    grid.append(malformed, later);
+    await settle();
+    await check('一张卡片异常时其余卡片继续过滤', () => assert(hidden(later) && visible(malformed), '整个过滤流程已停止'));
+    malformed.querySelector = select;
+    populate(later, 'allowed after malformed');
+    await settle();
+    await check('异常发生后仍能响应后续更新', () => assert(visible(later) && !hidden(later), '后续更新未生效'));
+
+    const newMain = document.createElement('main');
+    const newBlocked = card('new-blocked', 'block-me replaced main');
+    newMain.append(newBlocked);
+    main.replaceWith(newMain);
+    await settle();
+    await check('整块推荐区替换后自动处理新卡片', () => assert(hidden(newBlocked), '遗漏main挂载事件'));
+    const savedHistory = JSON.stringify(localSettings.btfBlockedHistory);
+    syncSettings.btfEnabled = false;
+    changes.forEach(listener => listener({ btfEnabled: { newValue: false } }, 'sync'));
+    await settle();
+    await check('关闭总开关后立即恢复已隐藏的视频', () => assert(!hidden(newBlocked) && visible(newBlocked), '关闭后仍隐藏'));
+    const pausedCard = card('paused-card', 'block-me while paused');
+    newMain.append(pausedCard);
+    await settle();
+    await check('关闭期间新增视频不再过滤', () => assert(!hidden(pausedCard) && visible(pausedCard), '新增视频仍被隐藏'));
+    let pausedState;
+    messages.forEach(listener => listener({ type: 'BTF_GET_STATE' }, {}, value => { pausedState = value; }));
+    await check('关闭期间当前记录清空且规则保留', () => assert(pausedState.enabled === false && pausedState.records.length === 0 && syncSettings.btfTitleKeywords[0] === 'block-me', '暂停状态或规则有误'));
+    await check('关闭开关不清除历史', () => assert(JSON.stringify(localSettings.btfBlockedHistory) === savedHistory, '历史被修改'));
+    syncSettings.btfEnabled = true;
+    changes.forEach(listener => listener({ btfEnabled: { newValue: true } }, 'sync'));
+    await settle();
+    await check('重新开启后处理原有和暂停期间新增的视频', () => assert(hidden(newBlocked) && hidden(pausedCard), '重新开启未过滤全部视频'));
+    await check('未发起额外网络请求', () => assert(networkRequests === 0, `${networkRequests}次请求`));
+
+    chrome.runtime.id = '';
+    changes.forEach(listener => listener({ btfTitleKeywords: {} }, 'sync'));
+    await settle();
+    await check('扩展失效后解除残留隐藏状态', () => assert(!hidden(newBlocked) && visible(newBlocked), '卡片永久残留隐藏'));
+    const summary = document.createElement('p');
+    summary.id = 'summary';
+    summary.textContent = `${failures ? 'FAIL' : 'PASS'}: ${document.querySelectorAll('#results li').length} checks, ${failures} failures (${delayedMount ? 'late main' : 'initial main'})`;
+    document.querySelector('#results').after(summary);
+  })();
+</script>
+</html>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>B站下一批推荐加载验证</title>
+<link rel="stylesheet" href="/content.css">
+<style>
+  body { margin: 20px; font: 15px/1.5 system-ui; }
+  #grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+  .feed-card, .load-more-anchor { height: 120px; background: #e3edf6; }
+  .floor-skeleton { height: 120px; background: #ddd; }
+  #results { position: fixed; z-index: 5; top: 0; right: 12px; max-width: 65vw; background: white; }
+  .pass { color: #08783c; } .fail { color: #b52121; }
+</style>
+<h1>下一批推荐加载验证</h1>
+<aside id="results"><p id="status">测试进行中</p><ol id="checks"></ol></aside>
+<button id="refresh">刷新内容</button>
+<main><div id="grid"></div></main>
+<script>
+  const mode = new URLSearchParams(location.search).get('mode') || 'normal';
+  const staggered = mode === 'staggered';
+  let releaseSettings;
+  const settingListeners = [];
+  const syncData = {
+    btfTitleKeywords: mode === 'far' ? [] : ['block-me'], btfUpKeywords: [],
+    btfCategoryKeywords: [], btfTagKeywords: [], btfSpecialTypes: [],
+    btfSpecialTypesVersion: 2, btfQualityEnabled: false
+  };
+  window.chrome = {
+    runtime: { id: 'feed-loading-test', onMessage: { addListener() {} }, sendMessage(_message, done) { done?.(); } },
+    storage: {
+      sync: { get(defaults, done) { releaseSettings = () => done({ ...defaults, ...syncData }); }, set(_data, done) { done?.(); } },
+      local: { get(defaults, done) { queueMicrotask(() => done(defaults)); }, set(_data, done) { done?.(); } },
+      onChanged: { addListener(listener) { settingListeners.push(listener); } }
+    }
+  };
+  let unexpectedNetwork = 0;
+  window.fetch = () => { unexpectedNetwork++; throw new Error('External network disabled'); };
+  let refreshClicks = 0;
+  document.querySelector('#refresh').onclick = () => refreshClicks++;
+  const grid = document.querySelector('#grid');
+  let sequence = 0;
+  function makeCard(blocked) {
+    const card = document.createElement('div');
+    card.className = 'feed-card';
+    card.innerHTML = `<div class="bili-video-card"><h3 class="bili-video-card__info--tit"><a href="https://www.bilibili.com/video/BV1Test${++sequence}">${blocked ? 'block-me' : 'allowed'} ${sequence}</a></h3></div>`;
+    return card;
+  }
+  for (let i = 0; i < 60; i++) grid.append(makeCard(true));
+  let firstPlaceholder = null;
+  const placeholders = [];
+  function makePlaceholder() {
+    const element = document.createElement('div');
+    element.className = 'bili-video-card';
+    element.innerHTML = '<div class="bili-video-card__skeleton"></div>';
+    placeholders.push(element);
+    return element;
+  }
+  if (staggered) {
+    const height = Math.round(innerHeight * 0.42);
+    const style = document.createElement('style');
+    style.textContent = `.feed-card, .load-more-anchor, #grid > .bili-video-card, .bili-video-card__skeleton, .floor-skeleton { height: ${height}px; } .bili-video-card__skeleton { background: #ddd; }`;
+    document.head.append(style);
+    // 8 surviving videos leave two vacancies in the second row. Bilibili puts
+    // four video skeletons BEFORE its floor anchor, which then falls in row 3.
+    for (let i = 0; i < 8; i++) grid.append(makeCard(false));
+    for (let i = 0; i < 4; i++) grid.append(makePlaceholder());
+    firstPlaceholder = placeholders[0];
+  }
+  const anchor = document.createElement('div');
+  anchor.className = 'load-more-anchor';
+  anchor.innerHTML = '<div class="floor-single-card"><div class="floor-card floor-skeleton"></div></div>';
+  grid.append(anchor);
+  if (staggered) for (let i = 0; i < 10; i++) grid.append(makePlaceholder());
+  const originalChildren = [...grid.children];
+  const originalAllowed = [...grid.querySelectorAll('.feed-card')].filter(card => !card.textContent.includes('block-me'));
+  const initialAllowedCount = originalAllowed.length;
+  let originalAllowedPositions = [];
+  let firstVacancyTop = null;
+  let firstNotificationTop = null;
+  const loadingIndicator = anchor.querySelector('.floor-skeleton');
+  let requests = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let notifications = 0;
+  const times = [];
+  const cardsPerBatch = Math.ceil((innerHeight + 400) / 132) * 5;
+
+  // Same scroll-only eligibility as the current Bilibili pJ(Q, F, {offset: 200}):
+  // load if anchor.bottom + offset <= innerHeight OR abs(bottom-innerHeight) < offset.
+  // F skips requests while the recommendation/floor request is still in progress.
+  function nativeCheck(event) {
+    if (event) {
+      notifications++;
+      if (firstNotificationTop === null) firstNotificationTop = anchor.getBoundingClientRect().top;
+    }
+    const { top, bottom } = anchor.getBoundingClientRect();
+    if (top === 0 && bottom === 0) return;
+    if (!(bottom + 200 <= innerHeight || Math.abs(bottom - innerHeight) < 200)) return;
+    if (inFlight) return;
+    requests++;
+    times.push(Date.now());
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    loadingIndicator.classList.add('show-animation');
+    setTimeout(() => {
+      if (mode !== 'failure') {
+        const batch = document.createDocumentFragment();
+        for (let i = 0; i < cardsPerBatch; i++) batch.append(makeCard(mode === 'normal' && requests === 1));
+        grid.insertBefore(batch, firstPlaceholder || anchor);
+      }
+      inFlight--;
+      loadingIndicator.classList.remove('show-animation');
+    }, mode === 'slow' ? 3400 : 100);
+  }
+  nativeCheck();
+  window.addEventListener('scroll', nativeCheck, { passive: true });
+  const initialRequests = requests;
+  const initialScroll = scrollY;
+  const wait = delay => new Promise(resolve => setTimeout(resolve, delay));
+  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  let failures = 0;
+  function check(name, condition) {
+    if (!condition) failures++;
+    const item = document.createElement('li');
+    item.className = condition ? 'pass' : 'fail';
+    item.textContent = `${condition ? 'PASS' : 'FAIL'} ${name}`;
+    document.querySelector('#checks').append(item);
+  }
+</script>
+<script src="/special-types.js"></script>
+<script src="/quality.js"></script>
+<script src="/feed-loader.js"></script>
+<script>
+  // Control case: keep the filter but remove only its new loading notifications.
+  if (mode === 'disabled') window.BTFFeedLoader = { create: () => ({ schedule() {}, dispose() {} }) };
+</script>
+<script src="/content.js"></script>
+<script>
+  (async () => {
+    await settle();
+    check('过滤前加载标记在视野以外，无原生请求', initialRequests === 0);
+    releaseSettings();
+    await settle();
+    if (staggered) {
+      firstVacancyTop = firstPlaceholder.getBoundingClientRect().top;
+      originalAllowedPositions = originalAllowed.map(card => ({ card, top:card.getBoundingClientRect().top, left:card.getBoundingClientRect().left }));
+      check('复现错行：空位已可见但加载标记仍在下一行', firstPlaceholder.getBoundingClientRect().top < innerHeight && anchor.getBoundingClientRect().bottom >= innerHeight + 200);
+    } else if (mode !== 'far') check('过滤后加载标记进入加载范围', anchor.getBoundingClientRect().bottom < innerHeight + 200);
+    if (mode === 'slow') {
+      await wait(2500);
+      check('慢请求未完成时没有重复加载通知', requests === 1 && notifications === 1 && inFlight === 1);
+      await wait(2300);
+    } else await wait(mode === 'failure' ? 7200 : 4200);
+
+    if (mode === 'disabled') {
+      check('旧逻辑复现：占位在视野内但下一批始终未加载', requests === 0);
+    } else if (mode === 'far') {
+      check('加载标记仍在远处时不触发请求', requests === 0 && notifications === 0);
+    } else if (mode === 'failure') {
+      check('无加载进展时最多重试三次', requests === 3 && notifications === 3);
+      const stoppedAt = requests;
+      await wait(1800);
+      check('停止后不会自行无限重试', requests === stoppedAt);
+    } else {
+      check('无需用户再次滚动就继续加载', requests >= 1);
+      if (mode === 'normal') check('新批次被过滤后仍能继续补下一批', requests === 2);
+      check('收到并显示新视频，填充到视野以外', [...grid.querySelectorAll('.feed-card')].filter(card => !card.textContent.includes('block-me')).length > initialAllowedCount && anchor.getBoundingClientRect().bottom >= innerHeight + 200);
+      const filledAt = requests;
+      await wait(1700);
+      check('填满后停止自动加载', requests === filledAt);
+    }
+    check('保持原来的滚动位置', scrollY === initialScroll);
+    check('不点击右下角刷新内容', refreshClicks === 0);
+    check('没有并发重复请求', maxInFlight <= 1);
+    check('加载通知间隔至少1.5秒', times.every((time, index) => !index || time - times[index - 1] >= 1450));
+    check('没有额外接口请求', unexpectedNetwork === 0);
+    if (staggered) {
+      check('加载通知发出时标记已对齐第一个空位', firstNotificationTop !== null && Math.abs(firstNotificationTop - firstVacancyTop) < 1);
+      check('原有视频在屏幕上的位置不变', originalAllowedPositions.every(({card,top,left}) => Math.abs(card.getBoundingClientRect().top-top)<1 && Math.abs(card.getBoundingClientRect().left-left)<1));
+      const retainedChildren = [...grid.children].filter(child => originalChildren.includes(child));
+      check('不改变B站管理的原有节点顺序', retainedChildren.every((child,index) => child === originalChildren[index]));
+      chrome.runtime.id = '';
+      settingListeners.forEach(listener => listener({ btfTitleKeywords: {} }, 'sync'));
+      check('扩展停止时解除占位排序标记', !grid.querySelector('[data-btf-load-anchor], [data-btf-load-placeholder]'));
+    }
+    document.querySelector('#status').textContent = `${failures ? 'FAIL' : 'PASS'}: ${document.querySelectorAll('#checks li').length} checks, ${failures} failures (${mode})`;
+  })();
+</script>
+</html>
